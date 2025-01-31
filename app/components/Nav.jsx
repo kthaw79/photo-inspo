@@ -24,6 +24,11 @@ export default function Nav(){
                         Discussions
                     </Link>
                 </li>
+                <li>
+                    <Link href="/search" className="text-gray-300 hover:text-white transition duration-300 ease-in-out">
+                        Search Users
+                    </Link>
+                </li>
             </ul>
         </nav>
     )
