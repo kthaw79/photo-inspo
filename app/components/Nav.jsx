@@ -20,8 +20,8 @@ export default function Nav(){
                     </Link>
                 </li>
                 <li>
-                    <Link href="/discussions" className="text-gray-300 hover:text-white transition duration-300 ease-in-out">
-                        Discussions
+                    <Link href="/inbox" className="text-gray-300 hover:text-white transition duration-300 ease-in-out">
+                        Inbox
                     </Link>
                 </li>
                 <li>
