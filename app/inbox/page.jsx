@@ -5,7 +5,7 @@ import { createServerClient } from "@supabase/ssr"
 import InboxClient from "./InboxClient"
 import { redirect } from "next/navigation"
 
-export default async function Inbox() {
+export default async function Inbox({ searchParams }) {
     const cookieStore = cookies()
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -21,6 +21,29 @@ export default async function Inbox() {
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) redirect('/')
+
+    // If there's a user param, ensure conversation exists
+    if (searchParams.user) {
+        const { data: existingMessages } = await supabase
+            .from('messages')
+            .select('*')
+            .or(
+                `and(sender_id.eq.${user.id},receiver_id.eq.${searchParams.user}),` +
+                `and(sender_id.eq.${searchParams.user},receiver_id.eq.${user.id})`
+            )
+            .limit(1)
+
+        // If no existing conversation, create one with initial message
+        if (!existingMessages || existingMessages.length === 0) {
+            await supabase
+                .from('messages')
+                .insert({
+                    sender_id: user.id,
+                    receiver_id: searchParams.user,
+                    content: "👋 Hello!"
+                })
+        }
+    }
 
     // Get all messages where user is sender or receiver
     const { data: messages, error } = await supabase
@@ -59,6 +82,14 @@ export default async function Inbox() {
 
     const conversations = Array.from(conversationsMap.values())
 
+    // If there's a user param, find and select that conversation
+    let initialSelectedConversation = null
+    if (searchParams.user) {
+        initialSelectedConversation = conversations.find(conv => 
+            [conv.user1_id, conv.user2_id].includes(searchParams.user)
+        )
+    }
+
     return (
         <main className="min-h-screen bg-black text-gray-200 relative p-8"
             style={{ 
@@ -71,6 +102,7 @@ export default async function Inbox() {
                 <InboxClient 
                     initialConversations={conversations}
                     currentUser={user}
+                    initialSelectedConversation={initialSelectedConversation}
                 />
             </div>
             <div className="absolute top-5 right-5">

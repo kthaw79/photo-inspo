@@ -58,12 +58,20 @@ export default function SearchForm({ onSearchResult }) {
       ) : searchResult && (
         <div className="bg-gray-900 bg-opacity-80 p-4 rounded-lg">
           <p className="text-white">User: {searchResult[0].email}</p>
-          <button 
-            onClick={() => onSearchResult({ ...searchResult[0], showGallery: true })}
-            className="text-blue-400 hover:underline mt-2"
-          >
-            View Gallery
-          </button>
+          <div className="flex gap-2 mt-2">
+            <button 
+              onClick={() => onSearchResult({ ...searchResult[0], showGallery: true })}
+              className="text-blue-400 hover:underline"
+            >
+              View Gallery
+            </button>
+            <button
+              onClick={() => window.location.href = `/inbox?user=${searchResult[0].id}`}
+              className="text-blue-400 hover:underline ml-4"
+            >
+              Message
+            </button>
+          </div>
         </div>
       )}
     </div>
