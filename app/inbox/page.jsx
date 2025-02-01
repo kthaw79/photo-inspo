@@ -31,7 +31,7 @@ export default async function Inbox() {
             receiver:user_profiles!receiver_id(id, email)
         `)
         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
 
     if (error) {
         console.error('Error fetching messages:', error)

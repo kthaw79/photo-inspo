@@ -1,56 +1,119 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { sendMessageAndRefresh } from './actions'
 
 export default function InboxClient({ initialConversations, currentUser }) {
     const [conversations, setConversations] = useState(initialConversations)
     const [selectedConversation, setSelectedConversation] = useState(null)
     const [newMessage, setNewMessage] = useState('')
+    const messagesContainerRef = useRef(null)
+    const messagesEndRef = useRef(null)
     const supabase = createClientComponentClient()
+
+    // Scroll to bottom instantly (for conversation changes)
+    const scrollToBottomInstant = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+    }
+
+    // Smooth scroll from current position (for new messages)
+    const scrollToBottomSmooth = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+
+    // Scroll to bottom when conversation changes
+    useEffect(() => {
+        if (selectedConversation) {
+            scrollToBottomInstant()
+        }
+    }, [selectedConversation?.user1_id, selectedConversation?.user2_id])
+
+    // Helper function to check if two conversations are the same
+    const isSameConversation = (conv1, conv2) => {
+        const ids1 = [conv1.user1_id, conv1.user2_id].sort().join('-')
+        const ids2 = [conv2.user1_id, conv2.user2_id].sort().join('-')
+        return ids1 === ids2
+    }
 
     const handleSendMessage = async (e) => {
         e.preventDefault()
         if (!newMessage.trim() || !selectedConversation) return
 
+        const tempId = `temp-${Date.now()}`
+        const optimisticMessage = {
+            id: tempId,
+            sender_id: currentUser.id,
+            receiver_id: currentUser.id === selectedConversation.user1_id 
+                ? selectedConversation.user2_id 
+                : selectedConversation.user1_id,
+            content: newMessage.trim(),
+            created_at: new Date().toISOString(),
+            status: 'sending',
+            sender: { id: currentUser.id, email: currentUser.email }
+        }
+
+        // Add optimistic message
+        const updatedMessages = [...selectedConversation.messages, optimisticMessage]
+        setSelectedConversation({
+            ...selectedConversation,
+            messages: updatedMessages,
+            last_message_at: optimisticMessage.created_at
+        })
+        setNewMessage('')
+        setTimeout(scrollToBottomSmooth, 100)
+
         try {
-            const { error } = await supabase
-                .from('messages')
-                .insert({
-                    sender_id: currentUser.id,
-                    receiver_id: currentUser.id === selectedConversation.user1_id 
-                        ? selectedConversation.user2_id 
-                        : selectedConversation.user1_id,
-                    content: newMessage.trim()
-                })
-
-            if (error) throw error
-            setNewMessage('')
+            const serverMessages = await sendMessageAndRefresh(
+                currentUser.id,
+                selectedConversation, 
+                optimisticMessage.content
+            )
             
-            // Refresh the conversation
-            const { data, error: fetchError } = await supabase
-                .from('messages')
-                .select('*, sender:sender_id(email), receiver:receiver_id(email)')
-                .or(
-                    `and(sender_id.eq.${selectedConversation.user1_id},receiver_id.eq.${selectedConversation.user2_id}),
-                     and(sender_id.eq.${selectedConversation.user2_id},receiver_id.eq.${selectedConversation.user1_id})`
-                )
-                .order('created_at', { ascending: true })
-
-            if (!fetchError && data) {
-                setSelectedConversation({
+            if (serverMessages) {
+                const updatedSelectedConversation = {
                     ...selectedConversation,
-                    messages: data
+                    messages: serverMessages,
+                    last_message_at: serverMessages[serverMessages.length - 1].created_at
+                }
+                setSelectedConversation(updatedSelectedConversation)
+
+                setConversations(prevConversations => {
+                    const updatedConversations = prevConversations.map(conv => 
+                        isSameConversation(conv, selectedConversation) 
+                            ? updatedSelectedConversation 
+                            : conv
+                    )
+                    return [...updatedConversations].sort((a, b) => 
+                        new Date(b.last_message_at) - new Date(a.last_message_at)
+                    )
                 })
             }
         } catch (error) {
             console.error('Error sending message:', error)
+            // Update the optimistic message to show error
+            setSelectedConversation(prev => ({
+                ...prev,
+                messages: prev.messages.map(msg => 
+                    msg.id === tempId 
+                        ? { ...msg, status: 'error' }
+                        : msg
+                )
+            }))
         }
     }
 
     const getOtherUserEmail = (conversation) => {
-        return currentUser.id === conversation.user1_id 
+        const email = currentUser.id === conversation.user1_id 
             ? conversation.user2.email 
             : conversation.user1.email
+        
+        if (email === currentUser.email) return 'Me';
+
+        // Truncate email at @ symbol
+        const [username, domain] = email.split('@')
+        return username.length > 15
+            ? username.substring(0, 13) + '...@' + domain
+            : email
     }
 
     return (
@@ -62,10 +125,10 @@ export default function InboxClient({ initialConversations, currentUser }) {
                     <div className="space-y-2">
                         {conversations.map((conversation) => (
                             <button
-                                key={`${conversation.user1_id}-${conversation.user2_id}`}
+                                key={[conversation.user1_id, conversation.user2_id].sort().join('-')}
                                 onClick={() => setSelectedConversation(conversation)}
                                 className={`w-full text-left p-3 rounded-lg transition ${
-                                    selectedConversation === conversation
+                                    selectedConversation && isSameConversation(selectedConversation, conversation)
                                         ? 'bg-blue-500'
                                         : 'hover:bg-gray-700'
                                 }`}
@@ -87,7 +150,7 @@ export default function InboxClient({ initialConversations, currentUser }) {
                                 Chat with {getOtherUserEmail(selectedConversation)}
                             </h2>
                             <div className="h-[500px] flex flex-col">
-                                <div className="flex-1 overflow-y-auto mb-4 space-y-4">
+                                <div className="flex-1 overflow-y-auto mb-4 space-y-4" ref={messagesContainerRef}>
                                     {selectedConversation.messages.map((message) => (
                                         <div
                                             key={message.id}
@@ -98,11 +161,28 @@ export default function InboxClient({ initialConversations, currentUser }) {
                                             }`}
                                         >
                                             <p>{message.content}</p>
-                                            <p className="text-xs text-gray-300 mt-1">
-                                                {new Date(message.created_at).toLocaleTimeString()}
-                                            </p>
+                                            <div className="flex justify-between items-center mt-1">
+                                                <p className="text-xs text-gray-300">
+                                                    {new Date(message.created_at).toLocaleString('en-US', {
+                                                        year: 'numeric',
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: 'numeric',
+                                                        minute: '2-digit',
+                                                        hour12: true
+                                                    })}
+                                                </p>
+                                                {message.sender_id === currentUser.id && (
+                                                    <span className="text-xs text-gray-300 ml-2">
+                                                        {message.status === 'sending' ? '• Sending...' : 
+                                                         message.status === 'error' ? '• Failed' : 
+                                                         '• Delivered'}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
+                                    <div ref={messagesEndRef} />
                                 </div>
                                 <form onSubmit={handleSendMessage} className="flex gap-2">
                                     <input
